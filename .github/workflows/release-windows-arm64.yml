@@ -1,0 +1,103 @@
+name: Release Windows ARM64
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Tag de la release (ex: v1.16.1-arm64). Laisser vide pour ne pas publier de release.'
+        required: false
+        default: ''
+
+jobs:
+  build-windows-arm64:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: gitconfig
+        run: git config --global core.autocrlf true
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust (aarch64-pc-windows-msvc)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: aarch64-pc-windows-msvc
+          components: rustfmt, clippy
+
+      - name: Set up cargo cache
+        uses: Swatinem/rust-cache@v2
+        continue-on-error: false
+        with:
+          key: ${{ runner.os }}-cargo-arm64-${{ hashFiles('rustybits/Cargo.lock') }}
+          shared-key: ${{ runner.os }}-cargo-arm64-
+          workspaces: |
+            rustybits/
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build ZeroTierOne (ARM64 Release)
+        shell: cmd
+        run: msbuild windows\ZeroTierOne.sln /m /p:Configuration=Release /p:Platform=ARM64 /t:ZeroTierOne
+
+      - name: Read version
+        id: version
+        shell: pwsh
+        run: |
+          $major = (Select-String -Path version.h -Pattern 'ZEROTIER_ONE_VERSION_MAJOR\s+(\d+)').Matches[0].Groups[1].Value
+          $minor = (Select-String -Path version.h -Pattern 'ZEROTIER_ONE_VERSION_MINOR\s+(\d+)').Matches[0].Groups[1].Value
+          $rev   = (Select-String -Path version.h -Pattern 'ZEROTIER_ONE_VERSION_REVISION\s+(\d+)').Matches[0].Groups[1].Value
+          $ver = "$major.$minor.$rev"
+          Write-Host "Version: $ver"
+          "version=$ver" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Stage release files
+        shell: pwsh
+        run: |
+          $stage = "release-staging"
+          New-Item -ItemType Directory -Path $stage | Out-Null
+          $src = "windows\Build\ARM64\Release"
+          if (-not (Test-Path $src)) {
+            Write-Error "Build output directory not found: $src"
+            exit 1
+          }
+          Get-ChildItem -Path $src -Include *.exe,*.dll,*.pdb -Recurse | Copy-Item -Destination $stage
+          Get-ChildItem $stage
+          $zip = "zerotier-one-windows-arm64-${{ steps.version.outputs.version }}.zip"
+          Compress-Archive -Path "$stage\*" -DestinationPath $zip -Force
+          "ASSET_ZIP=$zip" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: zerotier-one-windows-arm64
+          path: ${{ env.ASSET_ZIP }}
+          retention-days: 30
+
+      - name: Determine release tag
+        id: reltag
+        shell: pwsh
+        run: |
+          $tag = ""
+          if ("${{ github.event_name }}" -eq "push" -and "${{ github.ref_type }}" -eq "tag") {
+            $tag = "${{ github.ref_name }}"
+          } elseif ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $tag = "${{ github.event.inputs.release_tag }}"
+          }
+          Write-Host "Release tag: $tag"
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Create / update GitHub Release
+        if: steps.reltag.outputs.tag != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.reltag.outputs.tag }}
+          name: ZeroTier One ${{ steps.reltag.outputs.tag }} (Windows ARM64)
+          generate_release_notes: true
+          files: ${{ env.ASSET_ZIP }}
