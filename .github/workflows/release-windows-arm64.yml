@@ -46,6 +46,19 @@ jobs:
         shell: cmd
         run: msbuild windows\ZeroTierOne.sln /m /p:Configuration=Release /p:Platform=ARM64 /t:ZeroTierOne
 
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Publish ZeroTier Tray (ARM64, self-contained, single-file)
+        shell: pwsh
+        run: |
+          dotnet publish windows/ZeroTierTray/ZeroTierTray.csproj `
+            -c Release -r win-arm64 --self-contained true `
+            -p:PublishSingleFile=true `
+            -o windows/ZeroTierTray/publish-arm64
+
       - name: Read version
         id: version
         shell: pwsh
@@ -62,12 +75,24 @@ jobs:
         run: |
           $stage = "release-staging"
           New-Item -ItemType Directory -Path $stage | Out-Null
+
           $src = "windows\Build\ARM64\Release"
           if (-not (Test-Path $src)) {
             Write-Error "Build output directory not found: $src"
             exit 1
           }
           Get-ChildItem -Path $src -Include *.exe,*.dll,*.pdb -Recurse | Copy-Item -Destination $stage
+
+          # Include zeroidc.dll from rustybits target (used by service at runtime)
+          $rustDll = "rustybits\target\aarch64-pc-windows-msvc\release\zeroidc.dll"
+          if (Test-Path $rustDll) { Copy-Item $rustDll $stage }
+
+          # Include the WPF tray (single-file self-contained)
+          $trayPub = "windows\ZeroTierTray\publish-arm64"
+          if (Test-Path $trayPub) {
+            Get-ChildItem -Path $trayPub -Include *.exe,*.dll,*.pdb -Recurse | Copy-Item -Destination $stage
+          }
+
           Get-ChildItem $stage
           $zip = "zerotier-one-windows-arm64-${{ steps.version.outputs.version }}.zip"
           Compress-Archive -Path "$stage\*" -DestinationPath $zip -Force

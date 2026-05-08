@@ -1,0 +1,19 @@
+<Application x:Class="ZeroTierTray.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:tb="http://www.hardcodet.net/taskbar"
+             ShutdownMode="OnExplicitShutdown">
+    <Application.Resources>
+        <ContextMenu x:Shared="false" x:Key="TrayMenu">
+            <MenuItem Header="Open ZeroTier Tray" Click="OnOpenClick" FontWeight="Bold"/>
+            <Separator/>
+            <MenuItem Header="Join Network..." Click="OnJoinClick"/>
+            <MenuItem Header="Open my.zerotier.com" Click="OnWebUiClick"/>
+            <Separator/>
+            <MenuItem Header="Copy Node ID" Click="OnCopyNodeIdClick"/>
+            <MenuItem Header="Refresh" Click="OnRefreshClick"/>
+            <Separator/>
+            <MenuItem Header="Exit" Click="OnExitClick"/>
+        </ContextMenu>
+    </Application.Resources>
+</Application>
